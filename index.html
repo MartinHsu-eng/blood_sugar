@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>每日血糖健康紀錄本</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 650px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="number"], input[type="datetime-local"], textarea {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .radio-group {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #preview {
+            max-width: 200px;
+            margin-top: 10px;
+            display: none;
+            border: 1px solid #ddd;
+            padding: 5px;
+        }
+        .filter-group {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            background-color: #6c757d;
+        }
+        .filter-btn:hover {
+            background-color: #5a6268;
+        }
+        .filter-btn.active {
+            background-color: #212529;
+            box-shadow: inset 0 3px 5px rgba(0,0,0,0.125);
+        }
+        .chart-container {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        #trendChart {
+            width: 100%;
+            height: 220px;
+            background-color: #fafafa;
+        }
+        .history-list {
+            margin-top: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .history-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+            position: relative;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .history-img {
+            max-width: 100px;
+            display: block;
+            margin-top: 5px;
+        }
+        .delete-btn {
+            position: absolute;
+            right: 5px;
+            top: 10px;
+            background-color: #dc3545;
+            padding: 5px 8px;
+            font-size: 12px;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .delete-btn:hover {
+            background-color: #bd2130;
+        }
+        .action-btns {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        #importFile {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>每日血糖健康紀錄本</h1>
+
+    <div class="form-group">
+        <label>量測狀態</label>
+        <div class="radio-group">
+            <label><input type="radio" name="status" value="before" checked> 飯前空腹</label>
+            <label><input type="radio" name="status" value="after"> 飯後 2 小時</label>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="measureTime">量測時間</label>
+        <input type="datetime-local" id="measureTime" required>
+    </div>
+
+    <div class="form-group">
+        <label for="sugarValue">量測血糖值 (mg/dL)</label>
+        <input type="number" id="sugarValue" placeholder="請輸入血糖值" required>
+    </div>
+
+    <div class="form-group">
+        <label for="dietNote">飲食備註 (這餐吃了什麼)</label>
+        <textarea id="dietNote" rows="3" placeholder="例如：糙米飯、雞胸肉、花椰菜"></textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="imageUpload">上傳此餐照片 (選填)</label>
+        <input type="file" id="imageUpload" accept="image/*">
+        <img id="preview" src="" alt="預覽圖">
+    </div>
+
+    <button id="saveBtn">儲存今日紀錄</button>
+
+    <hr>
+
+    <h3>血糖趨勢圖</h3>
+    <div class="chart-container">
+        <canvas id="trendChart"></canvas>
+    </div>
+
+    <div class="form-group">
+        <label>時間範圍篩選：</label>
+        <div class="filter-group">
+            <button class="filter-btn active" onclick="setFilter('all', this)">全部</button>
+            <button class="filter-btn" onclick="setFilter(7, this)">近 7 天</button>
+            <button class="filter-btn" onclick="setFilter(15, this)">近 15 天</button>
+            <button class="filter-btn" onclick="setFilter(30, this)">近 30 天</button>
+            <button class="filter-btn" onclick="setFilter(60, this)">近 60 天</button>
+        </div>
+    </div>
+
+    <h3>歷史紀錄明細</h3>
+    <div id="historyContainer" class="history-list">
+        <p style="color: #666;">目前尚無紀錄</p>
+    </div>
+
+    <div class="action-btns">
+        <button id="exportBtn" style="background-color: #28a745;">匯出數據 (JSON)</button>
+        <button id="importBtn" style="background-color: #17a2b8;">匯入數據 (JSON)</button>
+        <input type="file" id="importFile" accept=".json">
+    </div>
+
+    <!-- 核心：載入外部 JavaScript 檔案 -->
+    <script>
+	const STORAGE_KEY = 'blood_sugar_records_data';
+let bloodSugarRecords = [];
+
+try {
+    const savedData = localStorage.getItem(STORAGE_KEY);
+    if (savedData) {
+        bloodSugarRecords = JSON.parse(savedData);
+    }
+} catch (e) {
+    console.error('LocalStorage 讀取失敗', e);
+}
+
+let currentImageBase64 = "";
+let currentFilterDays = 'all';
+
+function initDateTimePicker() {
+    const now = new Date();
+    const tzoffset = now.getTimezoneOffset() * 60000;
+    const localISOTime = (new Date(now - tzoffset)).toISOString().slice(0, 16);
+    document.getElementById('measureTime').value = localISOTime;
+}
+
+initDateTimePicker();
+updateUI();
+
+document.getElementById('imageUpload').addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    const preview = document.getElementById('preview');
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            currentImageBase64 = e.target.result;
+            preview.src = currentImageBase64;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    } else {
+        currentImageBase64 = "";
+        preview.src = "";
+        preview.style.display = 'none';
+    }
+});
+
+document.getElementById('saveBtn').addEventListener('click', function() {
+    const status = document.querySelector('input[name="status"]:checked').value;
+    const dateTimeVal = document.getElementById('measureTime').value;
+    const value = document.getElementById('sugarValue').value;
+    const note = document.getElementById('dietNote').value;
+
+    if (!dateTimeVal) { alert('請選擇量測時間！'); return; }
+    if (!value) { alert('請輸入血糖值！'); return; }
+
+    const newRecord = {
+        id: Date.now(),
+        timestamp: new Date(dateTimeVal).getTime(),
+        dateTimeStr: dateTimeVal.replace('T', ' '),
+        status: status === 'before' ? '飯前空腹' : '飯後 2 小時',
+        value: parseInt(value),
+        note: note,
+        image: currentImageBase64
+    };
+
+    bloodSugarRecords.push(newRecord);
+    bloodSugarRecords.sort((a, b) => b.timestamp - a.timestamp);
+    saveToLocalStorage();
+    updateUI();
+    clearForm();
+});
+
+function saveToLocalStorage() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(bloodSugarRecords));
+    } catch (e) {
+        alert('儲存空間不足，建議使用匯出 JSON 功能備份資料！');
+    }
+}
+
+function deleteRecord(id) {
+    if (confirm('確定要刪除這筆血糖紀錄嗎？')) {
+        bloodSugarRecords = bloodSugarRecords.filter(r => r.id !== id);
+        saveToLocalStorage();
+        updateUI();
+    }
+}
+
+function setFilter(days, element) {
+    currentFilterDays = days;
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    element.classList.add('active');
+    updateUI();
+}
+
+function getFilteredRecords() {
+    if (currentFilterDays === 'all') return bloodSugarRecords;
+    const cutoffTime = Date.now() - (currentFilterDays * 24 * 60 * 60 * 1000);
+    return bloodSugarRecords.filter(r => r.timestamp >= cutoffTime);
+}
+
+function updateUI() {
+    const filteredData = getFilteredRecords();
+    updateHistoryUI(filteredData);
+    drawChart(filteredData);
+}
+
+function updateHistoryUI(records) {
+    const container = document.getElementById('historyContainer');
+    if (records.length === 0) {
+        container.innerHTML = '<p style="color: #666;">該時間範圍內尚無紀錄</p>';
+        return;
+    }
+
+    let htmlContent = "";
+    for (let i = 0; i < records.length; i++) {
+        const r = records[i];
+        let itemHtml = '<div class="history-item">';
+        itemHtml += '<button class="delete-btn" onclick="deleteRecord(' + r.id + ')">刪除</button>';
+        itemHtml += '<strong>[' + r.dateTimeStr + '] - ' + r.status + '</strong><br>';
+        
+        const color = r.value > 140 ? '#dc3545' : '#28a745';
+        itemHtml += '血糖值: <span style="color: ' + color + '; font-weight:bold;">' + r.value + ' mg/dL</span><br>';
+        
+        if (r.note) { itemHtml += '飲食備註: ' + r.note + '<br>'; }
+        if (r.image) { itemHtml += '<img src="' + r.image + '" class="history-img" alt="餐點照片">'; }
+        itemHtml += '</div>';
+        htmlContent += itemHtml;
+    }
+    container.innerHTML = htmlContent;
+}
+
+function drawChart(records) {
+    const canvas = document.getElementById('trendChart');
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    const width = rect.width;
+    const height = rect.height;
+    ctx.clearRect(0, 0, width, height);
+
+    if (records.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('暫無數據繪製圖表', width / 2, height / 2);
+        return;
+    }
+
+    const chartData = [...records].sort((a, b) => a.timestamp - b.timestamp);
+    const padding = { top: 25, right: 55, bottom: 30, left: 40 };
+    const graphWidth = width - padding.left - padding.right;
+    const graphHeight = height - padding.top - padding.bottom;
+
+    const values = chartData.map(r => r.value);
+    const maxVal = Math.max(...values, 150);
+    const minVal = Math.min(...values, 60);
+    const valRange = maxVal - minVal;
+
+    ctx.strokeStyle = '#fbc2c4';
+    ctx.lineWidth = 1;
+    const alertY = padding.top + graphHeight - ((140 - minVal) / valRange) * graphHeight;
+    if(alertY >= padding.top && alertY <= padding.top + graphHeight) {
+        ctx.beginPath(); ctx.moveTo(padding.left, alertY); ctx.lineTo(width - padding.right, alertY); ctx.stroke();
+        ctx.fillStyle = '#dc3545'; ctx.font = '10px Arial'; ctx.textAlign = 'left';
+        ctx.fillText('140 警示線', width - padding.right + 2, alertY + 3);
+    }
+
+    const points = [];
+    chartData.forEach((record, index) => {
+        const x = padding.left + (chartData.length > 1 ? (index / (chartData.length - 1)) * graphWidth : graphWidth / 2);
+        const y = padding.top + graphHeight - ((record.value - minVal) / valRange) * graphHeight;
+        points.push({ x: x, y: y, val: record.value, time: record.dateTimeStr.substring(5) });
+    });
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#007bff';
+    ctx.lineWidth = 2;
+    points.forEach((pt, idx) => { if (idx === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
+    ctx.stroke();
+
+    points.forEach((pt) => {
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, 2 * Math.PI); ctx.fillStyle = '#007bff'; ctx.fill();
+        ctx.fillStyle = '#333'; ctx.font = '10px Arial'; ctx.textAlign = 'center'; ctx.fillText(pt.val, pt.x, pt.y - 8);
+        ctx.fillStyle = '#777'; ctx.fillText(pt.time, pt.x, height - 10);
+    });
+
+    ctx.fillStyle = '#666'; ctx.font = '10px Arial'; ctx.textAlign = 'right';
+    ctx.fillText(maxVal, padding.left - 5, padding.top + 5);
+    ctx.fillText(minVal, padding.left - 5, height - padding.bottom);
+}
+
+function clearForm() {
+    document.getElementById('sugarValue').value = '';
+    document.getElementById('dietNote').value = '';
+    document.getElementById('imageUpload').value = '';
+    document.getElementById('preview').style.display = 'none';
+    document.getElementById('preview').src = '';
+    currentImageBase64 = "";
+    initDateTimePicker();
+}
+
+document.getElementById('exportBtn').addEventListener('click', function() {
+    if (bloodSugarRecords.length === 0) { alert('目前沒有數據可以匯出！'); return; }
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bloodSugarRecords, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "blood_sugar_records.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+});
+
+document.getElementById('importBtn').addEventListener('click', function() { document.getElementById('importFile').click(); });
+document.getElementById('importFile').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        try {
+            const parsedData = JSON.parse(event.target.result);
+            if (Array.isArray(parsedData)) {
+                bloodSugarRecords = parsedData;
+                bloodSugarRecords.sort((a, b) => b.timestamp - a.timestamp);
+                saveToLocalStorage(); updateUI(); alert('數據匯入成功！');
+            } else { alert('格式錯誤，必須是 JSON 陣列。'); }
+        } catch (err) { alert('讀取 JSON 失敗。'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+});
+
+window.addEventListener('resize', () => { drawChart(getFilteredRecords()); });
+	</script>
+</body>
+</html>
